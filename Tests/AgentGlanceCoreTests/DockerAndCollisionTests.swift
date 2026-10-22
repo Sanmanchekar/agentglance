@@ -193,3 +193,27 @@ private func container(_ id: String, created: Date, compose: String? = nil, moun
         #expect(a == b)
     }
 }
+
+@Suite struct InstallerMigrationTests {
+    @Test func homebrewInstallPointsAtStablePrefixPath() {
+        let brew = Installer.hookBinary(forExecutable: "/opt/homebrew/Cellar/agentglance/0.1.1/bin/agentglance")
+        #expect(brew.binary == "/opt/homebrew/bin/agentglance")
+        #expect(!brew.needsCopy)
+        let source = Installer.hookBinary(forExecutable: "/work/.build/release/agentglance")
+        #expect(source.binary == Installer.defaultBinary)
+        #expect(source.needsCopy)
+    }
+
+    @Test func reinstallMovesHooksAndStatusLineToNewBinary() {
+        let old = Installer.install(into: [
+            "hooks": ["Stop": [["hooks": [["type": "command", "command": "/x/cc-status"]]]]],
+            "statusLine": ["type": "command", "command": "~/.claude/statusline-command.sh"],
+        ], binary: "/Users/me/.local/bin/agentglance")
+        let moved = Installer.install(into: old, binary: "/opt/homebrew/bin/agentglance")
+        let stop = ((moved["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]])?
+            .flatMap { ($0["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String } }
+        #expect(stop == ["/x/cc-status", "/opt/homebrew/bin/agentglance hook"])
+        #expect((moved["statusLine"] as? [String: Any])?["command"] as? String
+                == "/opt/homebrew/bin/agentglance statusline -- ~/.claude/statusline-command.sh")
+    }
+}

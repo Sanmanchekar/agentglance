@@ -8,6 +8,15 @@ public enum Installer {
         "Notification", "Stop", "StopFailure", "SubagentStop", "SessionEnd",
     ]
     public static let defaultBinary = NSHomeDirectory() + "/.local/bin/agentglance"
+
+    /// Where hooks should point. A Homebrew install uses `<prefix>/bin/agentglance`, which survives
+    /// `brew upgrade`; anything else is copied to ~/.local/bin.
+    public static func hookBinary(forExecutable path: String) -> (binary: String, needsCopy: Bool) {
+        if let cellar = path.range(of: "/Cellar/agentglance/") {
+            return (String(path[..<cellar.lowerBound]) + "/bin/agentglance", false)
+        }
+        return (defaultBinary, path != defaultBinary)
+    }
     public static let settingsURL = URL(fileURLWithPath: NSHomeDirectory() + "/.claude/settings.json")
 
     /// Recognises our entries by the binary path used to install them, or by name for other install paths.
@@ -22,24 +31,35 @@ public enum Installer {
     public static func install(into settings: [String: Any], binary: String = defaultBinary) -> [String: Any] {
         var settings = settings
         var hooks = settings["hooks"] as? [String: Any] ?? [:]
+        let hookCommand = "\(binary) hook"
         for event in hookEvents {
-            var groups = hooks[event] as? [[String: Any]] ?? []
-            let present = groups.contains { group in
-                (group["hooks"] as? [[String: Any]] ?? []).contains { isOurs($0["command"] as? String, binary: binary) }
+            var present = false
+            // Re-point existing entries (e.g. moved from ~/.local/bin to Homebrew) rather than adding duplicates.
+            var groups = (hooks[event] as? [[String: Any]] ?? []).map { group -> [String: Any] in
+                var group = group
+                group["hooks"] = (group["hooks"] as? [[String: Any]] ?? []).map { entry -> [String: Any] in
+                    guard isOurs(entry["command"] as? String, binary: binary) else { return entry }
+                    present = true
+                    var entry = entry
+                    entry["command"] = hookCommand
+                    return entry
+                }
+                return group
             }
             if !present {
-                groups.append(["hooks": [["type": "command", "command": "\(binary) hook", "timeout": 5]]])
+                groups.append(["hooks": [["type": "command", "command": hookCommand, "timeout": 5]]])
             }
             hooks[event] = groups
         }
         settings["hooks"] = hooks
 
         var statusLine = settings["statusLine"] as? [String: Any] ?? ["type": "command"]
-        let existing = statusLine["command"] as? String
-        if !isOurs(existing, binary: binary) {
-            statusLine["command"] = existing.map { "\(binary) statusline -- \($0)" } ?? "\(binary) statusline"
-            statusLine["type"] = "command"
+        var wrapped = statusLine["command"] as? String
+        if let current = wrapped, isOurs(current, binary: binary) {
+            wrapped = current.range(of: "statusline -- ").map { String(current[$0.upperBound...]) }
         }
+        statusLine["command"] = wrapped.map { "\(binary) statusline -- \($0)" } ?? "\(binary) statusline"
+        statusLine["type"] = "command"
         settings["statusLine"] = statusLine
         return settings
     }
@@ -83,9 +103,15 @@ public enum Installer {
                 (group["hooks"] as? [[String: Any]] ?? []).contains { isOurs($0["command"] as? String, binary: binary) }
             }
         }
+        func commands(_ hooks: [String: Any], _ event: String) -> [String] {
+            (hooks[event] as? [[String: Any]] ?? []).flatMap { ($0["hooks"] as? [[String: Any]] ?? []) }
+                .compactMap { $0["command"] as? String }.filter { isOurs($0, binary: binary) }
+        }
         for event in Set(oldHooks.keys).union(newHooks.keys).sorted() {
             let was = ours(oldHooks, event), now = ours(newHooks, event)
+            let oldCmds = commands(oldHooks, event), newCmds = commands(newHooks, event)
             if !was && now { lines.append("+ hooks.\(event): agentglance hook (existing hooks kept)") }
+            if was && now && oldCmds != newCmds { lines.append("~ hooks.\(event): \(newCmds.joined()) (moved)") }
             if was && !now { lines.append("- hooks.\(event): agentglance hook") }
         }
         let oldStatus = (before["statusLine"] as? [String: Any])?["command"] as? String

@@ -149,12 +149,11 @@ func installOrUninstall(_ install: Bool) {
     guard args.isEmpty else { fail("unexpected arguments: \(args.joined(separator: " "))") }
     let before: [String: Any]
     do { before = try Installer.loadSettings() } catch { fail("can't read \(Installer.settingsURL.path): \(error)") }
-    let after = install ? Installer.install(into: before) : Installer.uninstall(from: before)
-    let changes = Installer.describeChanges(from: before, to: after)
-
-    let destination = Installer.defaultBinary
     let source = Bundle.main.executablePath.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
-    let copyBinary = install && source != nil && source != destination
+    let (destination, needsCopy) = Installer.hookBinary(forExecutable: source ?? Installer.defaultBinary)
+    let after = install ? Installer.install(into: before, binary: destination) : Installer.uninstall(from: before, binary: destination)
+    let changes = Installer.describeChanges(from: before, to: after, binary: destination)
+    let copyBinary = install && source != nil && needsCopy
     if copyBinary { print("+ copy \(source!) → \(destination)") }
     if changes.isEmpty {
         print(install ? "Hooks and status line bridge are already installed." : "Nothing to uninstall.")
