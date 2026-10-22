@@ -21,7 +21,7 @@ Internal (called by Claude Code): agentglance hook, agentglance statusline [-- C
 
 var args = Array(CommandLine.arguments.dropFirst())
 var command = "ps"
-if let first = args.first, !first.hasPrefix("-") || first == "-h" || first == "--help" {
+if let first = args.first, !first.hasPrefix("-") || ["-h", "--help", "-v", "--version"].contains(first) {
     command = args.removeFirst()
 }
 
@@ -258,6 +258,9 @@ case "clean":
     let result = monitor.clean(sessionKeys: sessionKeys, pids: pidSet, containerIds: containerSet, in: snapshot)
     print(result.summary + ".")
     for (id, reason) in result.skipped { print("    skipped \(id.pid): \(reason)") }
+
+case "-v", "--version", "version":
+    print("agentglance \(AgentGlanceVersion.current)")
 
 case "-h", "--help", "help":
     print(usage)

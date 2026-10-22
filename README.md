@@ -19,7 +19,16 @@
 ## Why
 Agents leave background processes running after a session ends. Activity Monitor can't tell which `node` belongs to which agent, so you can't clean up safely. AgentGlance tracks **ownership**: each process is tied to the agent session that started it, even after the agent exits.
 
-## Use
+## Install
+```bash
+brew install sanmanchekar/tap/agentglance          # CLI
+brew install --cask sanmanchekar/tap/agentglance-app   # menu bar app
+agentglance install                                 # optional: Claude Code state + limits
+```
+The app isn't notarized yet. If macOS says it can't be opened, run
+`xattr -dr com.apple.quarantine /Applications/AgentGlance.app` once, or allow it in System Settings → Privacy & Security.
+
+## Build from source
 ```bash
 swift build -c release
 .build/release/agentglance ps            # who started what

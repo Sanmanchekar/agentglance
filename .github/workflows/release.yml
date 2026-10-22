@@ -1,0 +1,36 @@
+name: Release
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check version matches tag
+        run: |
+          VERSION=$(sed -n 's/.*current = "\(.*\)".*/\1/p' Sources/AgentGlanceCore/Version.swift)
+          test "v$VERSION" = "$GITHUB_REF_NAME" || { echo "Version.swift says $VERSION, tag is $GITHUB_REF_NAME"; exit 1; }
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+      - run: swift test
+      - name: Build universal CLI
+        run: |
+          swift build -c release --arch arm64 --arch x86_64 --product agentglance
+          mkdir -p dist
+          cp .build/apple/Products/Release/agentglance dist/
+          codesign --force --sign - dist/agentglance
+          tar -C dist -czf "agentglance-$VERSION-macos-universal.tar.gz" agentglance
+      - name: Build universal app
+        run: |
+          UNIVERSAL=1 ./scripts/bundle.sh
+          ditto -c -k --keepParent build/AgentGlance.app "AgentGlance-$VERSION.zip"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shasum -a 256 agentglance-*.tar.gz AgentGlance-*.zip | tee SHA256SUMS
+          lipo -info dist/agentglance
+          gh release create "$GITHUB_REF_NAME" --title "AgentGlance $VERSION" --generate-notes \
+            "agentglance-$VERSION-macos-universal.tar.gz" "AgentGlance-$VERSION.zip" SHA256SUMS
