@@ -13,6 +13,7 @@
 - **Who started what:** every process (dev servers, MCP servers, watchers) and Docker container, tied to the agent session that started it, even after the agent exits.
 - **Safe cleanup:** one click (or `agentglance clean`) stops what ended sessions left behind, and nothing else.
 - **Clash warnings:** two agents editing the same folder, the same migration number added in two worktrees, ports held by leftovers.
+- **Who needs you:** each Claude session shows *working*, *your turn* or *needs permission*, and the menu bar shows a 🔔 count. Your 5-hour and weekly plan limits appear as gauges. Run `agentglance install` once to enable this.
 - **Notifications:** "fix-tests ended but left 3 procs · 1.2 GB running" with a Clean up button. Optional auto-clean, launch at login.
 
 ## Why
@@ -25,6 +26,7 @@ swift build -c release
 .build/release/agentglance clean --dry-run
 .build/release/agentglance clean         # stop everything ended sessions left behind
 ./scripts/bundle.sh && open build/AgentGlance.app   # menu bar app
+.build/release/agentglance install --dry-run   # preview the Claude Code hooks + status line bridge
 ./scripts/test.sh                        # tests
 ```
 

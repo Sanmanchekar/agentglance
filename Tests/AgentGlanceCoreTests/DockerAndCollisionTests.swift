@@ -141,3 +141,55 @@ private func container(_ id: String, created: Date, compose: String? = nil, moun
         #expect(groups["/repo"]?.map(\.key).sorted() == ["a", "b"])
     }
 }
+
+@Suite struct ActivityAndInstallerTests {
+    @Test func mapsHookEventsToActivity() {
+        #expect(StateStore.activity(forHook: "PreToolUse", payload: [:]) == .working)
+        #expect(StateStore.activity(forHook: "Stop", payload: [:]) == .waiting)
+        #expect(StateStore.activity(forHook: "PermissionRequest", payload: [:]) == .needsPermission)
+        #expect(StateStore.activity(forHook: "Notification", payload: ["notification_type": "permission_prompt"]) == .needsPermission)
+        #expect(StateStore.activity(forHook: "Notification", payload: ["message": "Claude is waiting for your input"]) == .waiting)
+        #expect(StateStore.activity(forHook: "StopFailure", payload: [:]) == .error)
+        #expect(StateStore.activity(forHook: "SomethingNew", payload: [:]) == nil)
+    }
+
+    @Test func parsesStatusLineRateLimits() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let payload: [String: Any] = ["rate_limits": [
+            "five_hour": ["used_percentage": 23.5, "resets_at": 1_800_003_600],
+            "seven_day": ["used_percentage": 41, "resets_at": 1_800_400_000],
+        ]]
+        let limits = StateStore.parseLimits(payload, now: now)
+        #expect(limits?.fiveHour?.usedPercent == 23.5)
+        #expect(limits?.sevenDay?.resetsAt == Date(timeIntervalSince1970: 1_800_400_000))
+        // After the 5h window resets, its stale percentage is dropped.
+        #expect(limits?.current(at: Date(timeIntervalSince1970: 1_800_010_000)).fiveHour == nil)
+        #expect(StateStore.parseLimits(["model": "x"], now: now) == nil)
+    }
+
+    let existing: [String: Any] = [
+        "hooks": ["Stop": [["hooks": [["type": "command", "command": "/x/cc-status"]]]]],
+        "statusLine": ["type": "command", "command": "~/.claude/statusline-command.sh", "refreshInterval": 5],
+        "enabledPlugins": ["a": true],
+    ]
+
+    @Test func installKeepsExistingHooksAndWrapsStatusLine() {
+        let after = Installer.install(into: existing, binary: "/bin/ag")
+        let stop = (after["hooks"] as? [String: Any])?["Stop"] as? [[String: Any]]
+        let commands = stop?.flatMap { ($0["hooks"] as? [[String: Any]] ?? []).compactMap { $0["command"] as? String } }
+        #expect(commands == ["/x/cc-status", "/bin/ag hook"])
+        let status = after["statusLine"] as? [String: Any]
+        #expect(status?["command"] as? String == "/bin/ag statusline -- ~/.claude/statusline-command.sh")
+        #expect(status?["refreshInterval"] as? Int == 5)
+        #expect(after["enabledPlugins"] != nil)
+        // Idempotent.
+        #expect(Installer.describeChanges(from: after, to: Installer.install(into: after, binary: "/bin/ag"), binary: "/bin/ag").isEmpty)
+    }
+
+    @Test func uninstallRestoresOriginal() throws {
+        let roundTrip = Installer.uninstall(from: Installer.install(into: existing, binary: "/bin/ag"), binary: "/bin/ag")
+        let a = try JSONSerialization.data(withJSONObject: roundTrip, options: .sortedKeys)
+        let b = try JSONSerialization.data(withJSONObject: existing, options: .sortedKeys)
+        #expect(a == b)
+    }
+}

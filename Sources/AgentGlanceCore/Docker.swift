@@ -44,10 +44,13 @@ public enum DockerClient {
 
     /// Stops containers (`docker stop`, not `rm`, so nothing is deleted). Returns the IDs docker reported as stopped.
     public static func stop(_ ids: [String]) -> [String] {
-        guard let docker = path, !ids.isEmpty,
-              let result = Shell.run(docker, ["stop", "--time", "5"] + ids, timeout: 30) else { return [] }
-        let stopped = Set(String(decoding: result.output, as: UTF8.self).split(whereSeparator: \.isNewline).map(String.init))
-        return ids.filter { stopped.contains($0) || stopped.contains(String($0.prefix(12))) }
+        guard let docker = path, !ids.isEmpty else { return [] }
+        _ = Shell.run(docker, ["stop", "--time", "5"] + ids, timeout: 30)
+        // Judge by what is still running: a container may already be gone (e.g. `--rm` containers
+        // exit with their docker client), and `docker stop` reports those as errors.
+        guard let ps = Shell.run(docker, ["ps", "-q", "--no-trunc"], timeout: 5), ps.status == 0 else { return [] }
+        let running = Set(String(decoding: ps.output, as: UTF8.self).split(whereSeparator: \.isNewline).map(String.init))
+        return ids.filter { !running.contains($0) }
     }
 
     static func parseInspect(_ data: Data) -> [ContainerInfo] {

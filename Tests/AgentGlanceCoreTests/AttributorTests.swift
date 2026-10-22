@@ -1,4 +1,5 @@
 @testable import AgentGlanceCore
+import Foundation
 import Testing
 
 private func row(_ pid: Int32, _ ppid: Int32, _ name: String, start: UInt64? = nil,
@@ -101,5 +102,29 @@ private func row(_ pid: Int32, _ ppid: Int32, _ name: String, start: UInt64? = n
     @Test func parsesLsofFieldOutput() {
         let out = "p123\nn*:3000\nn[::1]:3000\np456\nn127.0.0.1:5173\n"
         #expect(PortScanner.parse(out) == [123: [3000], 456: [5173]])
+    }
+}
+
+@Suite struct MonitorRulesTests {
+    @Test func recognisesAgentGlanceOwnProcesses() {
+        let app = ProcRow(id: ProcID(pid: 1, start: 1), ppid: 1, name: "AgentGlance",
+                          path: "/x/build/AgentGlance.app/Contents/MacOS/AgentGlance")
+        let cli = ProcRow(id: ProcID(pid: 2, start: 1), ppid: 1, name: "agentglance", path: "/Users/me/.local/bin/agentglance")
+        let other = ProcRow(id: ProcID(pid: 3, start: 1), ppid: 1, name: "node", path: "/usr/local/bin/node")
+        #expect(Monitor.isAgentGlance(app))
+        #expect(Monitor.isAgentGlance(cli))
+        #expect(!Monitor.isAgentGlance(other))
+    }
+
+    @Test func bulkCleanSkipsAppsButExplicitPidDoesNot() {
+        let meta = SessionMeta(key: "k", tool: .claude, rootPid: 9, rootStart: 1, cwd: "/w", sessionId: nil)
+        let server = OwnedProcess(id: ProcID(pid: 10, start: 1), name: "node", command: "node", rssBytes: 1, cpuPercent: 0, ports: [])
+        let app = OwnedProcess(id: ProcID(pid: 11, start: 1), name: "Docker", command: "Docker", rssBytes: 1, cpuPercent: 0,
+                               ports: [], isApp: true)
+        let snapshot = Snapshot(takenAt: Date(), sessions: [AgentSession(meta: meta, isRunning: false, processes: [server, app])],
+                                localModels: [], warnings: [])
+        let monitor = Monitor(ledgerURL: nil)
+        #expect(monitor.targets(in: snapshot).processes.map(\.id.pid) == [10])
+        #expect(monitor.targets(pids: [11], in: snapshot).processes.map(\.id.pid) == [11])
     }
 }

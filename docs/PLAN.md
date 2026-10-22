@@ -22,7 +22,8 @@ Activity Monitor can't tell which `node` belongs to which agent, so nothing can 
 `(pid, start time)` is the identity throughout, so a reused PID is never mistaken for an old process.
 
 ## 4. Safety rules for cleanup
-- Only same-user processes. Never PID ≤ 1, never a live agent root, never this app.
+- Only same-user processes. Never PID ≤ 1, never a live agent root, never AgentGlance itself (it is excluded from attribution even when an agent launched it).
+- Mac apps (anything inside a `.app` bundle, e.g. Docker or Rancher Desktop that an agent opened) are shown but never bulk-cleaned; only an explicit `--pid` or the ✕ button stops one.
 - Re-check `(pid, start time)` right before every signal.
 - SIGTERM, a 3 s grace period, then SIGKILL for survivors.
 - By default only **ended** sessions are cleaned. A running session's processes are only killed one at a time, explicitly.
@@ -41,8 +42,8 @@ One Swift package, no third-party dependencies, macOS 14+:
 | ✅ M2 | Docker containers: **confirmed** when the session's own `docker` command started ≤120 s before creation; **likely** when the compose dir or mounts are inside the session folder and the container was created after the session started. Bulk cleanup stops (never removes) confirmed containers only. Supports Docker Desktop, Homebrew, Rancher Desktop and OrbStack. |
 | ✅ M3 | Clash warnings: ≥2 *active* agents (CPU in the last 2 min) in the same git worktree; the same migration number with different files across worktrees of one repo (`migrations/`, `versions/`, `db/migrate/`); ports held by leftovers |
 | ✅ M4 | Notification with a **Clean up** action when a session ends with leftovers, and for new clashes; launch at login (`SMAppService`); optional auto-clean 10 min or 1 h after a session ends |
-| M4.1 | Shared local DB/Redis clash detection; per-session leftover history |
-| M5 | Agent state via hooks, plan limits via the status line bridge |
+| ✅ M5 | Agent state from Claude Code hooks (`agentglance hook`: working / your turn / needs permission / error) and 5h + weekly limits from the status line bridge (`agentglance statusline -- <your command>`, ~70 ms overhead, output unchanged). `agentglance install` / `uninstall` edit `~/.claude/settings.json` with a timestamped backup and keep existing hooks. |
+| M4.1 | Shared local DB/Redis clash detection; per-session leftover history; Codex/Gemini state |
 | M6 | Signed and notarized `.app`, Homebrew cask |
 | Later | Team mode: opt-in export of leak and usage stats |
 

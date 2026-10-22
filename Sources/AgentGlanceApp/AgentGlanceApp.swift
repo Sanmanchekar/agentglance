@@ -169,14 +169,42 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 struct MenuBarLabel: View {
     let snapshot: Snapshot?
 
+    /// Most urgent first: leftovers, then agents waiting on you, then the running count. 5h limit appended.
     var body: some View {
+        let limit = snapshot?.limits?.fiveHour.map { " · \(Int($0.usedPercent.rounded()))%" } ?? ""
         if let snapshot, !snapshot.leftBehind.isEmpty {
-            Label(Format.bytes(snapshot.leftBehindRSS), systemImage: "exclamationmark.triangle.fill")
+            Label(Format.bytes(snapshot.leftBehindRSS) + limit, systemImage: "exclamationmark.triangle.fill")
+                .labelStyle(.titleAndIcon)
+        } else if let snapshot, !snapshot.needingYou.isEmpty {
+            Label("\(snapshot.needingYou.count)" + limit, systemImage: "bell.badge.fill")
                 .labelStyle(.titleAndIcon)
         } else {
             let running = snapshot?.running.count ?? 0
-            Label(running > 0 ? "\(running)" : "", systemImage: "cpu")
+            Label((running > 0 ? "\(running)" : "") + limit, systemImage: "cpu")
                 .labelStyle(.titleAndIcon)
+        }
+    }
+}
+
+struct LimitGauge: View {
+    let title: String
+    let window: LimitWindow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(title).font(.caption.bold())
+                Spacer()
+                Text("\(Int(window.usedPercent.rounded()))%").font(.caption.monospacedDigit())
+            }
+            ProgressView(value: min(window.usedPercent, 100), total: 100)
+                .tint(window.usedPercent >= 90 ? .red : window.usedPercent >= 75 ? .orange : .accentColor)
+            HStack(spacing: 3) {
+                Text("resets in")
+                Text(window.resetsAt, style: .relative)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
     }
 }
@@ -254,6 +282,13 @@ struct PanelView: View {
 
     private func content(_ snapshot: Snapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let limits = snapshot.limits, limits.fiveHour != nil || limits.sevenDay != nil {
+                HStack(alignment: .top, spacing: 16) {
+                    if let w = limits.fiveHour { LimitGauge(title: "5-hour limit", window: w) }
+                    if let w = limits.sevenDay { LimitGauge(title: "Weekly limit", window: w) }
+                }
+            }
+
             ForEach(snapshot.warnings, id: \.self) { warning in
                 Label(warning.message, systemImage: warning.kind == .leftoverPort ? "network" : "exclamationmark.triangle")
                     .font(.caption)
@@ -277,6 +312,9 @@ struct PanelView: View {
             let running = snapshot.running
             HStack {
                 Text("Running agents (\(running.count))").font(.subheadline.bold())
+                if !snapshot.needingYou.isEmpty {
+                    Text("\(snapshot.needingYou.count) need you").font(.caption.bold()).foregroundStyle(.orange)
+                }
                 Spacer()
                 if running.count > collapsedRunningCount {
                     Button(showAllRunning ? "Show fewer" : "Show all") { showAllRunning.toggle() }
@@ -314,11 +352,14 @@ struct SessionView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Image(systemName: session.isRunning ? "circle.fill" : "circle")
-                    .foregroundStyle(session.isRunning ? .green : .orange)
+                    .foregroundStyle(dotColor)
                     .font(.caption2)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(session.meta.label).font(.callout.bold()).lineLimit(1)
                     Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    if session.activity == .needsPermission, let message = session.activityMessage {
+                        Text(message).font(.caption2).foregroundStyle(.red).lineLimit(2)
+                    }
                 }
                 Spacer()
                 if !session.isRunning {
@@ -339,6 +380,10 @@ struct SessionView: View {
                     HStack(spacing: 6) {
                         Text("\(proc.id.pid)").font(.caption.monospacedDigit()).frame(width: 52, alignment: .trailing)
                         Text(proc.name).font(.caption).lineLimit(1)
+                        if proc.isApp {
+                            Text("app").font(.caption2).foregroundStyle(.secondary)
+                                .help("A Mac app the agent opened. Not included in Clean up; use ✕ to quit it.")
+                        }
                         if !proc.ports.isEmpty {
                             Text(proc.ports.map { ":\($0)" }.joined(separator: " "))
                                 .font(.caption.monospaced()).foregroundStyle(.blue)
@@ -383,10 +428,20 @@ struct SessionView: View {
         .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
     }
 
+    private var dotColor: Color {
+        guard session.isRunning else { return .orange }
+        switch session.activity {
+        case .needsPermission: return .red
+        case .waiting: return .yellow
+        case .error: return .pink
+        case .working, .idle, nil: return .green
+        }
+    }
+
     private var subtitle: String {
         let tool = session.meta.tool.rawValue
         let id = session.meta.shortSessionId.map { " · \($0)" } ?? ""
-        let state = session.isRunning ? "running" : "ended"
+        let state = session.isRunning ? (session.activity?.label ?? "running") : "ended"
         let summary = Format.leftovers(processes: session.processes.count, bytes: session.totalRSS,
                                        containers: session.containers.count)
         return "\(tool)\(id) · \(state) · \(summary)"

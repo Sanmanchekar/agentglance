@@ -87,6 +87,8 @@ public struct OwnedProcess: Identifiable, Sendable {
     public var rssBytes: UInt64
     public var cpuPercent: Double
     public var ports: [Int]
+    /// A macOS app (inside a .app bundle), e.g. Docker Desktop opened by an agent. Never bulk-cleaned.
+    public var isApp = false
 }
 
 public enum ContainerConfidence: String, Codable, Sendable {
@@ -123,6 +125,10 @@ public struct AgentSession: Identifiable, Sendable {
     public var containers: [OwnedContainer] = []
     /// When this monitor saw the agent exit; nil if running or if it ended before monitoring started.
     public var endedAt: Date?
+    /// Latest state from Claude Code hooks; nil when hooks aren't installed or haven't fired yet.
+    public var activity: AgentActivity?
+    public var activityMessage: String?
+    public var activitySince: Date?
 
     public var id: String { meta.key }
     public var totalRSS: UInt64 { processes.reduce(0) { $0 + $1.rssBytes } }
@@ -151,6 +157,11 @@ public struct Snapshot: Sendable {
     public var justEnded: Set<String> = []
     /// Whether a Docker daemon answered; containers are only tracked when it did.
     public var dockerAvailable = false
+    /// Claude plan limits from the status line bridge (expired windows already dropped).
+    public var limits: PlanLimits?
+
+    /// Running sessions that are blocked on you: a permission prompt or a finished turn.
+    public var needingYou: [AgentSession] { running.filter { $0.activity?.needsYou == true } }
 
     public var running: [AgentSession] { sessions.filter(\.isRunning) }
     /// Ended sessions that still have live processes or containers.

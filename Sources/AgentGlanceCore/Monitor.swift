@@ -44,6 +44,9 @@ public final class Monitor {
             ppid = parent.ppid
         }
 
+        // Nor AgentGlance itself (the menu bar app or another CLI run), even when an agent launched it.
+        for row in rows where Self.isAgentGlance(row) { excluded.insert(row.pid) }
+
         let previousSessions = ledger.sessions
         let attribution = Attributor.attribute(rows, ledger: &ledger, excluding: excluded)
         var metas = attribution.sessions
@@ -104,7 +107,8 @@ public final class Monitor {
             }
             cpu[row.id] = (row.cpuNanos, now)
             return OwnedProcess(id: row.id, name: row.name, command: row.commandLine,
-                                rssBytes: row.rssBytes, cpuPercent: percent, ports: ports[row.pid] ?? [])
+                                rssBytes: row.rssBytes, cpuPercent: percent, ports: ports[row.pid] ?? [],
+                                isApp: row.path?.contains(".app/Contents/") ?? false)
         }
 
         // Session lifecycle.
@@ -121,15 +125,46 @@ public final class Monitor {
         }
         // Ended sessions with nothing left are history, not something to show.
         sessions.removeAll { !$0.isRunning && !$0.hasLeftovers }
-        sessions.sort { ($0.isRunning ? 1 : 0, $0.totalRSS) > ($1.isRunning ? 1 : 0, $1.totalRSS) }
+        attachActivity(&sessions, alive: Set(byPid.keys), now: now)
+        func urgency(_ s: AgentSession) -> Int {
+            switch s.activity { case .needsPermission: 3; case .waiting: 2; case .working: 1; default: 0 }
+        }
+        sessions.sort { ($0.isRunning ? 1 : 0, urgency($0), $0.totalRSS) > ($1.isRunning ? 1 : 0, urgency($1), $1.totalRSS) }
         let models = ollama.map(owned).sorted { $0.rssBytes > $1.rssBytes }
         lastCPU = cpu
 
         let snapshot = Snapshot(takenAt: now, sessions: sessions, localModels: models,
                                 warnings: warnings(sessions: sessions, now: now),
-                                justEnded: justEnded, dockerAvailable: dockerAvailable)
+                                justEnded: justEnded, dockerAvailable: dockerAvailable,
+                                limits: StateStore.loadLimits()?.current(at: now))
         lastSnapshot = snapshot
         return snapshot
+    }
+
+    /// Matches hook-reported activity to running sessions by agent PID, and prunes records of dead agents.
+    private func attachActivity(_ sessions: inout [AgentSession], alive: Set<Int32>, now: Date) {
+        let records = StateStore.loadActivities()
+        for i in sessions.indices where sessions[i].isRunning {
+            let meta = sessions[i].meta
+            let started = Date(timeIntervalSince1970: Double(meta.rootStart) / 1_000_000)
+            let record = records.filter { record in
+                if let pid = record.claudePid { return pid == meta.rootPid && record.at >= started }
+                return record.sessionId == meta.sessionId
+            }.max { $0.at < $1.at }
+            guard let record else { continue }
+            sessions[i].activity = record.activity
+            sessions[i].activityMessage = record.message
+            sessions[i].activitySince = record.at
+            if sessions[i].meta.sessionId == nil { sessions[i].meta.sessionId = record.sessionId }
+        }
+        for record in records where now.timeIntervalSince(record.at) > 3600 && !(record.claudePid.map(alive.contains) ?? false) {
+            StateStore.removeActivity(sessionId: record.sessionId)
+        }
+    }
+
+    static func isAgentGlance(_ row: ProcRow) -> Bool {
+        let path = row.path ?? ""
+        return path.contains("/AgentGlance.app/") || path.hasSuffix("/agentglance") || row.name == "AgentGlanceApp"
     }
 
     private func recordDockerLaunches(_ owned: [String: [ProcRow]], now: Date) {
@@ -204,7 +239,7 @@ public final class Monitor {
         } else {
             sessions = explicit ? snapshot.sessions : snapshot.leftBehind
         }
-        let processes = sessions.flatMap(\.processes).filter { explicit ? pids?.contains($0.id.pid) ?? false : true }
+        let processes = sessions.flatMap(\.processes).filter { explicit ? pids?.contains($0.id.pid) ?? false : !$0.isApp }
         let containers = sessions.flatMap(\.containers).filter { container in
             guard explicit else { return container.confidence == .confirmed }
             return containerIds?.contains { container.id.hasPrefix($0) || container.name == $0 } ?? false
