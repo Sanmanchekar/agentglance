@@ -49,3 +49,6 @@ Containers are **confirmed** when the session's own `docker` command was seen ju
 Cleanup only touches processes from **ended** sessions (or single PIDs you name), re-checks each process's identity before signalling it, and sends SIGTERM, then SIGKILL after 3 s.
 
 See [docs/PLAN.md](docs/PLAN.md) for the design, the safety rules and the roadmap. Everything stays local.
+
+## License
+[MIT](LICENSE) © 2026 Sushant Manchekar
