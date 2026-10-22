@@ -1,23 +1,32 @@
 # AgentGlance
 
-A lightweight macOS menu bar app that shows, at a glance, how close you are to your AI plan limits (Claude's 5-hour and weekly windows) and what your agents are doing (`running`, `awaiting_input`, `idle`), with live tokens/second.
+**Activity Monitor for AI agents.** See what Claude Code, Codex and Gemini CLI started on your Mac (dev servers, MCP servers, watchers, sub-agents), and switch it off when they're done.
 
 ```
-5h 23% · 7d 41% · ● 2 running · 1 waiting
+● claude  login-page (e77adda0)     running · 3 procs · 412 MB
+○ claude  fix-tests  (9b1c22aa)     ENDED · left 2 procs · 1.2 GB
+      48211  node   :3000   812 MB
+      48230  esbuild        390 MB
 ```
 
-No more switching to terminal windows to check whether an agent is stuck waiting for you, or finding out mid-task that you've hit your limit.
+## Why
+Agents leave background processes running after a session ends. Activity Monitor can't tell which `node` belongs to which agent, so you can't clean up safely. AgentGlance tracks **ownership**: each process is tied to the agent session that started it, even after the agent exits.
 
-> Status: planning. See [docs/PLAN.md](docs/PLAN.md).
+## Use
+```bash
+swift build -c release
+.build/release/agentglance ps            # who started what
+.build/release/agentglance clean --dry-run
+.build/release/agentglance clean         # stop everything ended sessions left behind
+./scripts/bundle.sh && open build/AgentGlance.app   # menu bar app
+./scripts/test.sh                        # tests
+```
 
-## Planned sources
+## How it knows who started what
+1. **Live ancestry:** the process descends from a running `claude`, `codex` or `gemini`.
+2. **Inherited tag:** Claude Code stamps `CLAUDE_PID` and `CLAUDE_CODE_SESSION_ID` into every process it spawns, so leftovers stay traceable after Claude exits.
+3. **Ledger memory:** ownership is remembered as `(pid, start time) → session`, so other agents' leftovers stay traceable too, and a reused PID is never confused with an old process.
 
-| Source | How it's observed |
-|---|---|
-| Claude Code | Status line bridge for 5h/7d limits; tails `~/.claude/projects/**/*.jsonl` for tokens; hooks push state over a Unix socket |
-| Codex CLI | Tails `~/.codex/sessions/**/rollout-*.jsonl` |
-| Gemini CLI | OpenTelemetry (OTLP) receiver |
-| Ollama | Opt-in local proxy plus `/api/ps` polling |
-| Anything else | `agentglance run -- <cmd>` PTY wrapper |
+Cleanup only touches processes from **ended** sessions (or single PIDs you name), re-checks each process's identity before signalling it, and sends SIGTERM, then SIGKILL after 3 s.
 
-Everything stays local. AgentGlance reads only usage and limit metadata, never prompt content, and sends nothing off the machine.
+See [docs/PLAN.md](docs/PLAN.md) for the design, the safety rules and the roadmap. Everything stays local.
