@@ -9,6 +9,12 @@
       48230  esbuild        390 MB
 ```
 
+## What it does
+- **Who started what:** every process (dev servers, MCP servers, watchers) and Docker container, tied to the agent session that started it, even after the agent exits.
+- **Safe cleanup:** one click (or `agentglance clean`) stops what ended sessions left behind, and nothing else.
+- **Clash warnings:** two agents editing the same folder, the same migration number added in two worktrees, ports held by leftovers.
+- **Notifications:** "fix-tests ended but left 3 procs · 1.2 GB running" with a Clean up button. Optional auto-clean, launch at login.
+
 ## Why
 Agents leave background processes running after a session ends. Activity Monitor can't tell which `node` belongs to which agent, so you can't clean up safely. AgentGlance tracks **ownership**: each process is tied to the agent session that started it, even after the agent exits.
 
@@ -26,6 +32,8 @@ swift build -c release
 1. **Live ancestry:** the process descends from a running `claude`, `codex` or `gemini`.
 2. **Inherited tag:** Claude Code stamps `CLAUDE_PID` and `CLAUDE_CODE_SESSION_ID` into every process it spawns, so leftovers stay traceable after Claude exits.
 3. **Ledger memory:** ownership is remembered as `(pid, start time) → session`, so other agents' leftovers stay traceable too, and a reused PID is never confused with an old process.
+
+Containers are **confirmed** when the session's own `docker` command was seen just before the container was created, and **likely** when only the folder matches. Only confirmed ones are included in bulk cleanup (`docker stop`, never `rm`).
 
 Cleanup only touches processes from **ended** sessions (or single PIDs you name), re-checks each process's identity before signalling it, and sends SIGTERM, then SIGKILL after 3 s.
 

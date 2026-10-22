@@ -5,8 +5,20 @@ import Foundation
 public struct Ledger: Codable, Sendable {
     public var owners: [ProcID: String] = [:]
     public var sessions: [String: SessionMeta] = [:]
+    /// Container ID -> owning session.
+    public var containers: [String: ContainerOwner] = [:]
+    /// Session key -> start times (µs) of `docker` commands it ran recently.
+    public var dockerLaunches: [String: [UInt64]] = [:]
 
     public init() {}
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        owners = try c.decodeIfPresent([ProcID: String].self, forKey: .owners) ?? [:]
+        sessions = try c.decodeIfPresent([String: SessionMeta].self, forKey: .sessions) ?? [:]
+        containers = try c.decodeIfPresent([String: ContainerOwner].self, forKey: .containers) ?? [:]
+        dockerLaunches = try c.decodeIfPresent([String: [UInt64]].self, forKey: .dockerLaunches) ?? [:]
+    }
 
     public static func load(from url: URL) -> Ledger {
         guard let data = try? Data(contentsOf: url),

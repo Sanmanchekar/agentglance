@@ -16,7 +16,7 @@ Activity Monitor can't tell which `node` belongs to which agent, so nothing can 
 
 ## 3. How ownership is decided (in priority order)
 1. **Live ancestry:** the process descends from a live agent root (`claude`, `codex`, `gemini`; a process counts as a root only when no ancestor is already a root).
-2. **Inherited env tag:** Claude Code exports `CLAUDE_PID` and `CLAUDE_CODE_SESSION_ID` to everything it spawns (verified on v2.1.308), so the tag survives re-parenting to launchd after the agent dies. Only an allow-list of env keys is read; tokens are never read.
+2. **Inherited env tag:** Claude Code exports `CLAUDE_PID` and `CLAUDE_CODE_SESSION_ID` to everything it spawns (verified on v2.1.308), so the tag survives re-parenting to launchd after the agent dies. Only an allow-list of env keys is read; tokens are never read. *Limitation:* macOS hides the environment of Apple platform binaries (`/bin/sleep`, `/bin/zsh`), so for those only ancestry and the ledger apply. Typical leftovers (node, python, go, ruby servers) are readable.
 3. **Ledger memory:** every ownership decision is persisted as `(pid, start time) → session` in `~/Library/Application Support/AgentGlance/ledger.json`, so tools without an env tag (Codex, Gemini) keep their attribution after re-parenting while the app was running.
 
 `(pid, start time)` is the identity throughout, so a reused PID is never mistaken for an old process.
@@ -37,10 +37,11 @@ One Swift package, no third-party dependencies, macOS 14+:
 ## 6. Milestones
 | # | Deliverable |
 |---|---|
-| **M1 (now)** | Core attribution for Claude, Codex and Gemini, ledger, ports, Ollama memory, safe cleanup, CLI, menu bar app |
-| M2 | Docker containers (`docker ps` labels, compose working dir, `docker run` launched from an owned process) |
-| M3 | Collision warnings: same port, same local DB/Redis, duplicate migration numbers across worktrees |
-| M4 | Notifications ("session X ended and left 1.2 GB behind"), auto-clean rules, launch at login |
+| ✅ M1 | Core attribution for Claude, Codex and Gemini, ledger, ports, Ollama memory, safe cleanup, CLI, menu bar app |
+| ✅ M2 | Docker containers: **confirmed** when the session's own `docker` command started ≤120 s before creation; **likely** when the compose dir or mounts are inside the session folder and the container was created after the session started. Bulk cleanup stops (never removes) confirmed containers only. Supports Docker Desktop, Homebrew, Rancher Desktop and OrbStack. |
+| ✅ M3 | Clash warnings: ≥2 *active* agents (CPU in the last 2 min) in the same git worktree; the same migration number with different files across worktrees of one repo (`migrations/`, `versions/`, `db/migrate/`); ports held by leftovers |
+| ✅ M4 | Notification with a **Clean up** action when a session ends with leftovers, and for new clashes; launch at login (`SMAppService`); optional auto-clean 10 min or 1 h after a session ends |
+| M4.1 | Shared local DB/Redis clash detection; per-session leftover history |
 | M5 | Agent state via hooks, plan limits via the status line bridge |
 | M6 | Signed and notarized `.app`, Homebrew cask |
 | Later | Team mode: opt-in export of leak and usage stats |

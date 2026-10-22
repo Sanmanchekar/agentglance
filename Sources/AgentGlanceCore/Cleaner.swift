@@ -5,6 +5,16 @@ public struct CleanupResult: Sendable {
     public var stopped: [ProcID] = []
     public var forceKilled: [ProcID] = []
     public var skipped: [(ProcID, String)] = []
+    public var stoppedContainers: [String] = []
+    public var failedContainers: [String] = []
+
+    public var summary: String {
+        var parts = ["Stopped \(stopped.count + forceKilled.count) process(es)"]
+        if !stoppedContainers.isEmpty { parts.append("\(stoppedContainers.count) container(s)") }
+        if !skipped.isEmpty { parts.append("skipped \(skipped.count)") }
+        if !failedContainers.isEmpty { parts.append("\(failedContainers.count) container(s) failed") }
+        return parts.joined(separator: ", ")
+    }
 }
 
 public enum Cleaner {

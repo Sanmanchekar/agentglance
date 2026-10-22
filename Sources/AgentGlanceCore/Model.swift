@@ -61,6 +61,15 @@ public struct SessionMeta: Codable, Sendable, Hashable {
     public var cwd: String?
     public var sessionId: String?
 
+    public init(key: String, tool: AgentTool, rootPid: Int32, rootStart: UInt64, cwd: String?, sessionId: String?) {
+        self.key = key
+        self.tool = tool
+        self.rootPid = rootPid
+        self.rootStart = rootStart
+        self.cwd = cwd
+        self.sessionId = sessionId
+    }
+
     public var label: String {
         guard let cwd, !cwd.isEmpty else { return "\(tool.rawValue) pid \(rootPid)" }
         return (cwd as NSString).lastPathComponent
@@ -80,14 +89,56 @@ public struct OwnedProcess: Identifiable, Sendable {
     public var ports: [Int]
 }
 
+public enum ContainerConfidence: String, Codable, Sendable {
+    /// The session's own `docker` command was seen starting just before the container was created.
+    case confirmed
+    /// The container's compose dir or mounts are inside the session's folder and it was created after the session started.
+    case likely
+}
+
+public struct ContainerOwner: Codable, Sendable, Hashable {
+    public var sessionKey: String
+    public var confidence: ContainerConfidence
+
+    public init(sessionKey: String, confidence: ContainerConfidence) {
+        self.sessionKey = sessionKey
+        self.confidence = confidence
+    }
+}
+
+public struct OwnedContainer: Identifiable, Sendable {
+    public var id: String
+    public var name: String
+    public var image: String
+    public var ports: [Int]
+    public var confidence: ContainerConfidence
+
+    public var shortId: String { String(id.prefix(12)) }
+}
+
 public struct AgentSession: Identifiable, Sendable {
     public var meta: SessionMeta
     public var isRunning: Bool
     public var processes: [OwnedProcess]
+    public var containers: [OwnedContainer] = []
+    /// When this monitor saw the agent exit; nil if running or if it ended before monitoring started.
+    public var endedAt: Date?
 
     public var id: String { meta.key }
     public var totalRSS: UInt64 { processes.reduce(0) { $0 + $1.rssBytes } }
     public var totalCPU: Double { processes.reduce(0) { $0 + $1.cpuPercent } }
+    public var hasLeftovers: Bool { !processes.isEmpty || !containers.isEmpty }
+}
+
+public struct Warning: Hashable, Sendable {
+    public enum Kind: String, Sendable { case leftoverPort, sameFolder, migrationClash }
+    public var kind: Kind
+    public var message: String
+
+    public init(_ kind: Kind, _ message: String) {
+        self.kind = kind
+        self.message = message
+    }
 }
 
 public struct Snapshot: Sendable {
@@ -95,16 +146,28 @@ public struct Snapshot: Sendable {
     public var sessions: [AgentSession]
     /// Ollama server and runner processes (memory held by local models).
     public var localModels: [OwnedProcess]
-    public var warnings: [String]
+    public var warnings: [Warning]
+    /// Keys of sessions whose agent exited since the previous scan.
+    public var justEnded: Set<String> = []
+    /// Whether a Docker daemon answered; containers are only tracked when it did.
+    public var dockerAvailable = false
 
     public var running: [AgentSession] { sessions.filter(\.isRunning) }
-    /// Ended sessions that still have live processes.
-    public var leftBehind: [AgentSession] { sessions.filter { !$0.isRunning && !$0.processes.isEmpty } }
+    /// Ended sessions that still have live processes or containers.
+    public var leftBehind: [AgentSession] { sessions.filter { !$0.isRunning && $0.hasLeftovers } }
     public var leftBehindRSS: UInt64 { leftBehind.reduce(0) { $0 + $1.totalRSS } }
+    public var leftBehindContainers: Int { leftBehind.reduce(0) { $0 + $1.containers.count } }
 }
 
 public enum Format {
     public static func bytes(_ n: UInt64) -> String {
         ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .memory)
+    }
+
+    /// e.g. "3 procs · 1.2 GB · 2 containers"
+    public static func leftovers(processes: Int, bytes: UInt64, containers: Int) -> String {
+        var parts = ["\(processes) \(processes == 1 ? "proc" : "procs")", Format.bytes(bytes)]
+        if containers > 0 { parts.append("\(containers) \(containers == 1 ? "container" : "containers")") }
+        return parts.joined(separator: " · ")
     }
 }
