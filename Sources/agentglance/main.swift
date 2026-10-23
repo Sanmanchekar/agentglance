@@ -12,7 +12,7 @@ usage: agentglance [ps] [--json] [--no-docker]
           containers (`docker stop`, nothing is deleted). --session narrows to sessions;
           --pid / --container target exact items, including a running session's or a
           container that is only *likely* the agent's.
-  install Copies this binary to ~/.local/bin and adds to ~/.claude/settings.json (backup kept):
+  install Adds to ~/.claude/settings.json (backup kept; non-Homebrew builds are copied to ~/.local/bin):
           a hook that records whether each session is working or waiting for you, and a
           status line wrapper that saves your 5h/7d limits, then runs your status line as before.
 
