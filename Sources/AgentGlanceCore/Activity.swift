@@ -36,6 +36,9 @@ public struct ActivityRecord: Codable, Sendable {
 public struct LimitWindow: Codable, Sendable, Hashable {
     public var usedPercent: Double
     public var resetsAt: Date
+
+    /// The window rolled over and nothing has been used since: the next message starts a new one.
+    public func hasReset(at now: Date) -> Bool { resetsAt <= now }
 }
 
 /// Claude plan usage limits, as Claude Code reports them to the status line (Pro/Max only).
@@ -44,10 +47,12 @@ public struct PlanLimits: Codable, Sendable {
     public var sevenDay: LimitWindow?
     public var updatedAt: Date
 
-    /// Drops windows whose reset time has passed: their old percentage no longer applies.
+    /// A window whose reset time has passed is at 0%, not unknown: keep showing it, emptied.
     public func current(at now: Date) -> PlanLimits {
-        PlanLimits(fiveHour: fiveHour.flatMap { $0.resetsAt > now ? $0 : nil },
-                   sevenDay: sevenDay.flatMap { $0.resetsAt > now ? $0 : nil }, updatedAt: updatedAt)
+        func roll(_ w: LimitWindow?) -> LimitWindow? {
+            w.map { $0.hasReset(at: now) ? LimitWindow(usedPercent: 0, resetsAt: $0.resetsAt) : $0 }
+        }
+        return PlanLimits(fiveHour: roll(fiveHour), sevenDay: roll(sevenDay), updatedAt: updatedAt)
     }
 }
 

@@ -59,9 +59,13 @@ func limitsLine(_ limits: PlanLimits?) -> String? {
     let formatter = DateFormatter()
     formatter.dateFormat = "EEE HH:mm"
     let parts = [("5h", limits.fiveHour), ("7d", limits.sevenDay)].compactMap { name, w in
-        w.map { "\(name) \(Int($0.usedPercent.rounded()))% (resets \(formatter.string(from: $0.resetsAt)))" }
+        w.map { $0.hasReset(at: Date()) ? "\(name) 0% (reset; starts with your next message)"
+            : "\(name) \(Int($0.usedPercent.rounded()))% (resets \(formatter.string(from: $0.resetsAt)))" }
     }
-    return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    guard !parts.isEmpty else { return nil }
+    let age = Date().timeIntervalSince(limits.updatedAt)
+    let asOf = age > 600 ? " [as of \(formatter.string(from: limits.updatedAt)); refreshes while a Claude Code session is open]" : ""
+    return parts.joined(separator: " · ") + asOf
 }
 
 func render(_ snapshot: Snapshot) {

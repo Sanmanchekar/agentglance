@@ -189,6 +189,7 @@ struct MenuBarLabel: View {
 struct LimitGauge: View {
     let title: String
     let window: LimitWindow
+    let now: Date
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -199,9 +200,15 @@ struct LimitGauge: View {
             }
             ProgressView(value: min(window.usedPercent, 100), total: 100)
                 .tint(window.usedPercent >= 90 ? .red : window.usedPercent >= 75 ? .orange : .accentColor)
-            HStack(spacing: 3) {
-                Text("resets in")
-                Text(window.resetsAt, style: .relative)
+            Group {
+                if window.hasReset(at: now) {
+                    Text("reset · starts with your next message")
+                } else {
+                    HStack(spacing: 3) {
+                        Text("resets in")
+                        Text(window.resetsAt, style: .relative)
+                    }
+                }
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -283,9 +290,21 @@ struct PanelView: View {
     private func content(_ snapshot: Snapshot) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             if let limits = snapshot.limits, limits.fiveHour != nil || limits.sevenDay != nil {
-                HStack(alignment: .top, spacing: 16) {
-                    if let w = limits.fiveHour { LimitGauge(title: "5-hour limit", window: w) }
-                    if let w = limits.sevenDay { LimitGauge(title: "Weekly limit", window: w) }
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(alignment: .top, spacing: 16) {
+                        if let w = limits.fiveHour { LimitGauge(title: "5-hour limit", window: w, now: snapshot.takenAt) }
+                        if let w = limits.sevenDay { LimitGauge(title: "Weekly limit", window: w, now: snapshot.takenAt) }
+                    }
+                    // Limits only refresh while a Claude Code session's status line runs; say how old they are.
+                    if snapshot.takenAt.timeIntervalSince(limits.updatedAt) > 600 {
+                        HStack(spacing: 3) {
+                            Text("Updated")
+                            Text(limits.updatedAt, style: .relative)
+                            Text("ago · refreshes while a Claude Code session is open")
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    }
                 }
             }
 

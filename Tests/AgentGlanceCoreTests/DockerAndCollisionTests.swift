@@ -162,8 +162,11 @@ private func container(_ id: String, created: Date, compose: String? = nil, moun
         let limits = StateStore.parseLimits(payload, now: now)
         #expect(limits?.fiveHour?.usedPercent == 23.5)
         #expect(limits?.sevenDay?.resetsAt == Date(timeIntervalSince1970: 1_800_400_000))
-        // After the 5h window resets, its stale percentage is dropped.
-        #expect(limits?.current(at: Date(timeIntervalSince1970: 1_800_010_000)).fiveHour == nil)
+        // After the 5h window resets it reads 0% (still shown), while the weekly window keeps its value.
+        let later = limits?.current(at: Date(timeIntervalSince1970: 1_800_010_000))
+        #expect(later?.fiveHour?.usedPercent == 0)
+        #expect(later?.fiveHour?.hasReset(at: Date(timeIntervalSince1970: 1_800_010_000)) == true)
+        #expect(later?.sevenDay?.usedPercent == 41)
         #expect(StateStore.parseLimits(["model": "x"], now: now) == nil)
     }
 
